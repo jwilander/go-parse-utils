@@ -2,9 +2,12 @@ package parseutil
 
 import (
 	"errors"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -31,12 +34,21 @@ type packageFilter func(string, *ast.Package) bool
 // filteredPackages filters the parsed packages and then makes sure there is only
 // one left.
 func parseAndFilterPackages(path string, filter packageFilter) (pkg *ast.Package, err error) {
-	fset := token.NewFileSet()
 	srcDir, err := DefaultGoPath.Abs(path)
 	if err != nil {
-		return nil, err
+		goRoot := os.Getenv("GOROOT")
+		if goRoot == "" {
+			goRoot = "/usr/local/go"
+		}
+		rootPath := filepath.Join(goRoot, "src", path)
+		_, err = os.Stat(rootPath)
+		if err != nil {
+			return nil, fmt.Errorf("package %s not found in GOPATH or GOROOT", path)
+		}
+		srcDir = rootPath
 	}
 
+	fset := token.NewFileSet()
 	pkgs, err := parser.ParseDir(fset, srcDir, nil, parser.ParseComments)
 	if err != nil {
 		return nil, err
@@ -44,12 +56,18 @@ func parseAndFilterPackages(path string, filter packageFilter) (pkg *ast.Package
 
 	pkgs = filterPkgs(pkgs, filter)
 
-	if len(pkgs) != 1 {
-		return nil, ErrTooManyPackages
-	}
+	dirName := filepath.Base(srcDir)
 
-	for _, p := range pkgs {
-		pkg = p
+	if len(pkgs) == 1 {
+		for _, p := range pkgs {
+			pkg = p
+		}
+	} else {
+		if p, ok := pkgs[dirName]; ok {
+			pkg = p
+		} else {
+			return nil, ErrTooManyPackages
+		}
 	}
 
 	return
